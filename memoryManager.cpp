@@ -364,3 +364,142 @@ void initializeMemory(int mainSize, int virtSize, int pgSize) {
     mainMemoryData = std::vector<std::pair<bool, int>>((mainSize * 1024), {false, 0});
     virtualMemoryData = std::vector<std::pair<bool, int>>((virtSize * 1024), {false, 0});
 }
+
+void printAllPageTables(const std::string& filename, std::ofstream& output) {
+    std::ofstream pteFile(filename, std::ios::app);
+    time_t now = time(nullptr);
+    auto timeinfo = localtime(&now);
+    
+    pteFile << "\nAll Page Tables at " << asctime(timeinfo) << "\n";
+    
+    std::vector<int> pids;
+    for(const auto& process : processes) {
+        pids.push_back(process.first);
+    }
+    std::sort(pids.begin(), pids.end());
+    
+    for(int pid : pids) {
+        pteFile << "\nProcess " << pid << " Page Table:\n";
+        for(size_t i = 0; i < processes[pid]->pageTable.size(); i++) {
+            pteFile << "Virtual Page " << i << " -> Physical Page " 
+                   << processes[pid]->pageTable[i] << "\n";
+        }
+    }
+    pteFile.close();
+}
+
+void executeCommand(const std::string& command, std::ofstream& output) {
+    std::istringstream iss(command);
+    std::string cmd;
+    iss >> cmd;
+
+    if(cmd == "load") {
+        std::string filename;
+        iss >> filename;
+        loadProcess(filename, output);
+    }
+    else if(cmd == "run") {
+        int pid;
+        iss >> pid;
+        runProcess(pid, output);
+    }
+    else if(cmd == "kill") {
+        int pid;
+        iss >> pid;
+        killProcess(pid, output);
+    }
+    else if(cmd == "listpr") {
+        listProcesses(output);
+    }
+    else if(cmd == "pte") {
+        int pid;
+        std::string filename;
+        iss >> pid >> filename;
+        printPageTable(pid, filename, output);
+    }
+    else if(cmd == "pteall") {
+        std::string filename;
+        iss >> filename;
+        printAllPageTables(filename, output);
+    }
+    else if(cmd == "swapout") {
+        int pid;
+        iss >> pid;
+        moveToVirtualMemory(pid, output);
+    }
+    else if(cmd == "swapin") {
+        int pid;
+        iss >> pid;
+        moveToMainMemory(pid, output);
+    }
+    else if(cmd == "print") {
+        int location, length;
+        iss >> location >> length;
+        printMemory(location, length, output);
+    }
+    else if(cmd == "exit") {
+        isActive = false;
+    }
+    else {
+        output << "Unknown command: " << cmd << "\n";
+    }
+}
+
+int main(int argc, char* argv[]) {
+    if(argc != 11) {
+        std::cout << "Usage: " << argv[0] 
+                  << " -M <main_memory_size> -V <virtual_memory_size> "
+                  << "-P <page_size> -i <input_file> -o <output_file>\n";
+        return 1;
+    }
+
+    int mainSize = 0, virtSize = 0, pgSize = 0;
+    std::string inputFile, outputFile;
+
+    for(int i = 1; i < argc; i += 2) {
+        std::string flag = argv[i];
+        if(flag == "-M") mainSize = std::stoi(argv[i+1]);
+        else if(flag == "-V") virtSize = std::stoi(argv[i+1]);
+        else if(flag == "-P") pgSize = std::stoi(argv[i+1]);
+        else if(flag == "-i") inputFile = argv[i+1];
+        else if(flag == "-o") outputFile = argv[i+1];
+    }
+
+    if(mainSize <= 0 || virtSize <= 0 || pgSize <= 0 || 
+       inputFile.empty() || outputFile.empty()) {
+        std::cout << "Invalid parameters provided\n";
+        return 1;
+    }
+
+    // Initialize memory system
+    initializeMemory(mainSize, virtSize, pgSize);
+
+    // Open files
+    std::ifstream input(inputFile);
+    std::ofstream output(outputFile);
+
+    if(!input.is_open() || !output.is_open()) {
+        std::cout << "Error opening input or output files\n";
+        return 1;
+    }
+
+    // Process commands
+    std::string command;
+    while(isActive && std::getline(input, command)) {
+        if(!command.empty()) {
+            output << "\nExecuting: " << command << "\n";
+            executeCommand(command, output);
+        }
+    }
+
+    // Cleanup
+    for(auto& process : processes) {
+        delete process.second;
+    }
+    processes.clear();
+
+    input.close();
+    output.close();
+
+    return 0;
+}
